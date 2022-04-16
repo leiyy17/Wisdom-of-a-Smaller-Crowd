@@ -1,0 +1,76 @@
+clear;clc;system('taskkill /F /IM EXCEL.EXE');
+%% 参数
+global K; global I; global Q; global N; global t; global Nt; con=0;
+K=3; I=2; Q=2;    %专家数、预测变量个数、预先设置的cue个数
+%% 从excel表格data.xlsx中提取数据
+forecast_error=importdata('./data.xlsx');  %导入数据
+% forecast_error = data_produce();
+N=2; t1=0.3; t2=0.8; t=[t1;t2];%分位数概率值
+Nt1=norminv(t1,0,1);  Nt2=norminv(t2,0,1); Nt=[Nt1;Nt2];  %标准正态分布的分位数值
+%cc=size(forecast_error,1); id=randperm(cc);  id=id(1);
+id=1;
+yxls=forecast_error(id,:); %分位数值
+y=cell(K,I); 
+for k=1:K
+    for i=1:I
+        y{k,i}=yxls(1,(k-1)*I*N+(i-1)*N+1:(k-1)*I*N+(i-1)*N+N)';
+    end
+end
+y_it=y_vector(y);
+%% 产生beta和sigma的初始值
+r1=rand(K,Q); r2=sum(r1,2); be0=r1./r2; model0.beta=reshape(be0',K*Q,1);  %beta的初始值
+model0.sigma=rand(Q*I,1);  %sigma的初始值，介于0-1之间的随机数
+model0.mu=10 * rand(Q*I,1);    %mu的初始值，介于0-10之间的随机数
+% model0.beta=[0.1;0.9;0.5;0.5];
+% model0.sigma=[1;10;10;1];
+% model0.mu=[10;1;1;12];
+%% 计算真值的objective
+Li_real=L_real(y_it);
+%% 三阶段迭代
+tol=0.001;  maxiter=100;  %三阶段迭代阈值,迭代最大次数
+for iter=1:maxiter
+    %% 固定be0和si0，计算mu的解析解
+    be0=model0.beta;  si0=model0.sigma;
+    model.mu=solve_mu(be0,si0,y_it);
+    %% 固定be0和mu，采用em算法迭代计算sigma
+    mu=model.mu;
+    model.sigma=solve_sigma(be0,mu,y_it,si0);
+    %% 固定si和mu，采用fmincon计算be
+    si=model.sigma;
+    model.beta=solve_beta(si,mu,y_it,be0);
+    %%
+    modelxls(iter)=model;  %储存每次迭代中产生的beta、sigma、mu
+    L(iter)=result_y(model,y_it);
+    if (norm(model.beta-model0.beta)<tol) && (norm(model.mu-model0.mu)<tol) && (norm(model.sigma-model0.sigma)<tol)
+        break;
+    end
+%     if L(iter)<=Li_real
+%         break;
+%     end
+    model0=model;
+end
+for it=1:iter
+    %% 排序
+    x_sort_beta=reshape(modelxls(it).beta,Q,K)';
+    x_sort_sigma=reshape(modelxls(it).sigma,I,Q)';
+    x_sort_mu=reshape(modelxls(it).mu,I,Q)';
+    [A,S]=sortrows(x_sort_beta');
+    x_sort_beta=A';
+    x_sort_sigma=x_sort_sigma(S,:);  %按照排序beta的索引，对sigma和mu重新进行排序
+    x_sort_mu=x_sort_mu(S,:);
+    modelxls(it).beta=reshape(x_sort_beta',K*Q,1);
+    modelxls(it).sigma=reshape(x_sort_sigma',Q*I,1);
+    modelxls(it).mu=reshape(x_sort_mu',Q*I,1);
+end
+%% 找到目标函数值最小的参数
+[L_min,min_label]=min(L);
+min_beta=reshape(modelxls(min_label).beta,Q,K)';
+min_sigma=reshape(modelxls(min_label).sigma,I,Q)';
+min_mu=reshape(modelxls(min_label).mu,I,Q)';
+%% 结果显示
+disp('求出的beta为：'); disp(min_beta);
+disp('求出的sigma为：'); disp(min_sigma);
+disp('求出的mu为：'); disp(min_mu);
+%% 聚类
+cluster_true = cluster_function();
+cluster_estimated = cluster_function();
